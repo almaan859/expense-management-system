@@ -1,87 +1,114 @@
-import React,{useEffect,useState} from "react";
-import API from "../api/api";
+import React, { useEffect, useState } from "react";
+import axios from "axios";
+import {
+  Container,
+  Typography,
+  Card,
+  CardContent,
+  Table,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableBody,
+  Button,
+  Box,
+} from "@mui/material";
 
-import {Container,Typography,Table,TableHead,TableRow,TableCell,TableBody,Button,Paper} from "@mui/material";
+export default function ManagerDashboard() {
+  const [expenses, setExpenses] = useState([]);
+  const token = localStorage.getItem("token");
 
-export default function ManagerDashboard(){
+  const fetchExpenses = async () => {
+    try {
+      const res = await axios.get(
+        "http://localhost:4000/expenses/pending",
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
 
-const [expenses,setExpenses]=useState([]);
+      console.log("DATA:", res.data); // debug
 
-const token = localStorage.getItem("token");
+      setExpenses(res.data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
-const load = async()=>{
+  useEffect(() => {
+    fetchExpenses();
+  }, []);
 
-const res = await API.get("/expenses/pending",
-{headers:{Authorization:`Bearer ${token}`}}
-);
+  const approve = async (id) => {
+    await axios.put(
+      `http://localhost:4000/expenses/${id}/approve`,
+      {},
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    fetchExpenses();
+  };
 
-setExpenses(res.data);
+  const reject = async (id) => {
+    await axios.put(
+      `http://localhost:4000/expenses/${id}/reject`,
+      {},
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    fetchExpenses();
+  };
 
-};
+  return (
+    <Box sx={{
+      minHeight: "100vh",
+      background: "linear-gradient(135deg, #141e30, #243b55)",
+      paddingTop: "40px"
+    }}>
+      <Container>
+        <Typography variant="h4" align="center" sx={{ color: "#fff", mb: 4 }}>
+          Manager Dashboard
+        </Typography>
 
-const approve = async(id)=>{
+        <Card>
+          <CardContent>
+            <Typography variant="h6">Pending Expenses</Typography>
 
-await API.put(`/expenses/${id}/approve`,{},
-{headers:{Authorization:`Bearer ${token}`}}
-);
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>ID</TableCell>
+                  <TableCell>Amount</TableCell>
+                  <TableCell>Category</TableCell>
+                  <TableCell>Receipt</TableCell>
+                  <TableCell>Action</TableCell>
+                </TableRow>
+              </TableHead>
 
-load();
+              <TableBody>
+                {expenses.map((exp) => (
+                  <TableRow key={exp.id}>
+                    <TableCell>{exp.id}</TableCell>
+                    <TableCell>{exp.amount}</TableCell>
+                    <TableCell>{exp.category}</TableCell>
 
-};
+                    <TableCell>
+                      {exp.receipt && (
+                        <img src={`http://localhost:4000/uploads/${exp.receipt}`} width="60" />
+                      )}
+                    </TableCell>
 
-useEffect(()=>{
-load();
-},[]);
+                    <TableCell>
+                      <Button color="success" onClick={()=>approve(exp.id)}>Approve</Button>
+                      <Button color="error" onClick={()=>reject(exp.id)}>Reject</Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
 
-return(
+            </Table>
 
-<Container>
-
-<Typography variant="h4" style={{marginTop:40}}>
-Manager Dashboard
-</Typography>
-
-<Paper style={{marginTop:30}}>
-
-<Table>
-
-<TableHead>
-<TableRow>
-<TableCell>ID</TableCell>
-<TableCell>Amount</TableCell>
-<TableCell>Category</TableCell>
-<TableCell>Action</TableCell>
-</TableRow>
-</TableHead>
-
-<TableBody>
-
-{expenses.map(e=>(
-<TableRow key={e.id}>
-<TableCell>{e.id}</TableCell>
-<TableCell>{e.amount}</TableCell>
-<TableCell>{e.category}</TableCell>
-<TableCell>
-
-<Button
-variant="contained"
-onClick={()=>approve(e.id)}
->
-Approve
-</Button>
-
-</TableCell>
-</TableRow>
-))}
-
-</TableBody>
-
-</Table>
-
-</Paper>
-
-</Container>
-
-);
-
+          </CardContent>
+        </Card>
+      </Container>
+    </Box>
+  );
 }

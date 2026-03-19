@@ -1,71 +1,78 @@
-import React,{useState} from "react";
-import API from "../api/api";
+import React, { useState } from "react";
+import axios from "axios";
+import {
+  Container,
+  Typography,
+  TextField,
+  Button,
+  Card,
+  CardContent,
+  Box,
+} from "@mui/material";
 
-import {Container,Typography,TextField,Button,Paper,Box} from "@mui/material";
+export default function AdminDashboard() {
+  const [limit, setLimit] = useState("");
+  const [days, setDays] = useState("");
+  const token = localStorage.getItem("token");
 
-export default function AdminDashboard(){
+  const updateRules = async () => {
+    await axios.put(
+      "http://localhost:4000/admin/update-rules",
+      {
+        auto_approve_limit: limit,
+        escalation_days: days,
+      },
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
 
-const [limit,setLimit]=useState("");
-const [days,setDays]=useState("");
+    alert("Rules Updated");
+  };
 
-const token = localStorage.getItem("token");
+  return (
+    <Box sx={{
+      minHeight: "100vh",
+      background: "linear-gradient(135deg, #000428, #004e92)",
+      paddingTop: "40px"
+    }}>
+      <Container maxWidth="sm">
+        <Typography variant="h4" align="center" sx={{ color: "#fff", mb: 4 }}>
+          Admin Dashboard
+        </Typography>
 
-const updateRules = async()=>{
+        <Card sx={{ borderRadius: 3 }}>
+          <CardContent>
+            <Typography variant="h6" mb={2}>
+              Update System Rules
+            </Typography>
 
-await API.put("/admin/update-rules",
-{
-auto_approve_limit:limit,
-escalation_days:days
-},
-{
-headers:{Authorization:`Bearer ${token}`}
-});
+            <TextField
+              label="Auto Approve Limit"
+              fullWidth
+              sx={{ mb: 2 }}
+              value={limit}
+              onChange={(e) => setLimit(e.target.value)}
+            />
 
-alert("Rules Updated");
+            <TextField
+              label="Escalation Days"
+              fullWidth
+              sx={{ mb: 2 }}
+              value={days}
+              onChange={(e) => setDays(e.target.value)}
+            />
 
-};
-
-return(
-
-<Container>
-
-<Typography variant="h4" style={{marginTop:40}}>
-Admin Dashboard
-</Typography>
-
-<Paper style={{padding:30,marginTop:30}}>
-
-<Typography variant="h6">
-System Rules
-</Typography>
-
-<Box display="flex" gap={3} marginTop={3}>
-
-<TextField
-label="Auto Approve Limit"
-value={limit}
-onChange={e=>setLimit(e.target.value)}
-/>
-
-<TextField
-label="Escalation Days"
-value={days}
-onChange={e=>setDays(e.target.value)}
-/>
-
-<Button
-variant="contained"
-onClick={updateRules}
->
-Update
-</Button>
-
-</Box>
-
-</Paper>
-
-</Container>
-
-);
-
+            <Button
+              variant="contained"
+              fullWidth
+              onClick={updateRules}
+            >
+              UPDATE RULES
+            </Button>
+          </CardContent>
+        </Card>
+      </Container>
+    </Box>
+  );
 }
