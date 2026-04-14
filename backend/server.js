@@ -1,194 +1,415 @@
-require('dotenv').config();
+const express = require("express");
+const cors = require("cors");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const multer = require("multer");
+const path = require("path");
+const pool = require("./src/db");
 
-const express = require('express');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const cors = require('cors');
-
-const pool = require('./src/db');
-const auth = require('./src/middleware/auth');
-const role = require('./src/middleware/role');
+const {
+  extractReceiptText,
+  extractAmount
+} = require("./src/services/ocrService");
+const ruleEngine = require("./src/services/ruleEngine");
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
-app.use('/uploads', express.static('uploads'));
+app.use("/uploads", express.static("uploads"));
+
+const SECRET = "secret123";
 
 
-// ================= TEST ROUTE =================
-app.get('/', async (req, res) => {
-  try {
-    const [rows] = await pool.query('SELECT 1 + 1 AS result');
-    res.send("DB Connected. Result: " + rows[0].result);
-  } catch (err) {
-    console.error(err);
-    res.send("DB connection failed");
+/*
+=====================
+GLOBAL RULES ENGINE
+=====================
+*/
+
+let rules = {
+  autoApproveLimit: 0,
+  escalationDays: 0
+};
+
+
+/*
+=====================
+FILE UPLOAD CONFIG
+=====================
+*/
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/");
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + path.extname(file.originalname));
   }
 });
 
+const upload = multer({ storage });
 
-// ================= CREATE USER =================
-app.post('/users', async (req, res) => {
+
+/*
+=====================
+JWT VERIFY FUNCTION
+=====================
+*/
+
+function verifyToken(req, res, next) {
+
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    return res.status(401).json({ message: "Token missing" });
+  }
+
+  const token = authHeader.split(" ")[1];
+
   try {
+
+    const decoded = jwt.verify(token, SECRET);
+
+    req.user = decoded;
+
+    next();
+
+  } catch {
+
+    res.status(401).json({ message: "Invalid token" });
+
+  }
+}
+
+
+/*
+=====================
+CREATE USER
+=====================
+*/
+
+app.post("/users", async (req, res) => {
+
+  try {
+
     const { name, email, password, role, department } = req.body;
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
     await pool.query(
-      'INSERT INTO users (name, email, password, role, department) VALUES (?, ?, ?, ?, ?)',
+      "INSERT INTO users (name,email,password,role,department) VALUES (?,?,?,?,?)",
       [name, email, hashedPassword, role, department]
     );
 
-    res.send("User created");
+    res.json({ message: "User created successfully" });
+
   } catch (err) {
-    console.error(err);
-    res.send("Error creating user");
+
+    console.log(err);
+
+    res.status(500).json({ message: "User creation failed" });
+
   }
+
 });
 
 
-// ================= LOGIN =================
-app.post('/login', async (req, res) => {
+/*
+=====================
+LOGIN
+=====================
+*/
+
+app.post("/login", async (req, res) => {
+
   try {
+
     const { email, password } = req.body;
 
     const [rows] = await pool.query(
-      'SELECT * FROM users WHERE email = ?',
+      "SELECT * FROM users WHERE email=?",
       [email]
     );
 
-    if (rows.length === 0) {
-      return res.send("User not found");
+    if (!rows.length) {
+      return res.status(404).json({ message: "User not found" });
     }
 
     const user = rows[0];
 
-    const isMatch = await bcrypt.compare(password, user.password);
+    const match = await bcrypt.compare(password, user.password);
 
-    if (!isMatch) {
-      return res.send("Invalid credentials");
+    if (!match) {
+      return res.status(401).json({ message: "Invalid password" });
     }
 
     const token = jwt.sign(
-      { id: user.id, role: user.role, department: user.department },
-      process.env.JWT_SECRET || 'secret123',
-      { expiresIn: '1h' }
+      { id: user.id, role: user.role },
+      SECRET
     );
 
-    res.json({ message: "Login successful", token });
+    res.json({
+      token,
+      role: user.role,
+      user_id: user.id
+    });
 
   } catch (err) {
-    console.error(err);
-    res.send("Login error");
+
+    console.log(err);
+
+    res.status(500).json({ message: "Login failed" });
+
   }
+
 });
 
 
-// ================= SUBMIT EXPENSE =================
-app.post('/expenses', auth, async (req, res) => {
+/*
+=====================
+ADMIN UPDATE RULES - NOW PERSISTS TO DB
+=====================
+*/
+
+app.post("/rules", async (req, res) => {
   try {
-    const { amount, category, description } = req.body;
+    const autoApproveLimit = Number(req.body.autoApproveLimit);
+    const escalationDays = Number(req.body.escalationDays);
 
     await pool.query(
-      'INSERT INTO expenses (user_id, amount, category, description, status, department) VALUES (?, ?, ?, ?, ?, ?)',
-      [req.user.id, amount, category, description, 'pending', req.user.department]
+      `INSERT INTO approval_rules (auto_approve_limit, escalation_days) 
+       VALUES (?, ?) ON DUPLICATE KEY UPDATE 
+       auto_approve_limit=VALUES(auto_approve_limit), 
+       escalation_days=VALUES(escalation_days)`,
+      [autoApproveLimit, escalationDays]
     );
 
-    res.send("Expense submitted");
+    console.log(`Rules updated in DB: limit=${autoApproveLimit}, days=${escalationDays}`);
+
+    res.json({
+      message: "Rules updated successfully",
+      rules: { auto_approve_limit: autoApproveLimit, escalation_days: escalationDays }
+    });
   } catch (err) {
-    console.error(err);
-    res.send("Error submitting expense");
+    console.log(err);
+    res.status(500).json({ message: "Rules update failed" });
   }
 });
 
 
-// ================= GET USER EXPENSES =================
-app.get('/expenses', auth, async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      'SELECT * FROM expenses WHERE user_id = ?',
-      [req.user.id]
-    );
+/*
+=====================
+EMPLOYEE SUBMIT EXPENSE
+WITH OCR VALIDATION
+=====================
+*/
 
-    res.json(rows);
-  } catch (err) {
-    console.error(err);
-    res.send("Error fetching expenses");
+app.post(
+  "/employee/submit-expense",
+  verifyToken,
+  upload.single("receipt"),
+  async (req, res) => {
+
+    try {
+
+      const { amount, category, description } = req.body;
+
+      const submittedAmount = Number(amount);
+
+      const receiptFile = req.file ? req.file.filename : null;
+
+      let status = "pending";
+      let verification_status = "manual-review";
+      let receiptAmount = null;
+
+
+
+/*
+=====================
+OCR PROCESSING START
+=====================
+*/
+
+      if (receiptFile) {
+
+        const imagePath = `uploads/${receiptFile}`;
+
+        const extractedText =
+          await extractReceiptText(imagePath);
+
+        receiptAmount =
+          extractAmount(extractedText);
+
+
+/*
+=====================
+OCR MATCH CHECK
+=====================
+*/
+
+        console.log(`OCR Debug: submitted=${submittedAmount}, receiptAmount=${receiptAmount}, receiptFile=${receiptFile}`);
+
+const [dbRules] = await pool.query("SELECT auto_approve_limit FROM approval_rules LIMIT 1");
+        const adminLimit = Number(dbRules[0]?.auto_approve_limit || 0);
+        console.log(`Admin limit: ${adminLimit}`);
+
+        if (receiptAmount !== null && receiptAmount < adminLimit) {
+          status = "approved";
+          verification_status = "auto-ai-verified";
+          console.log('AI AUTO-APPROVED (OCR total < limit)');
+        } else {
+          status = "pending";
+          verification_status = "ai-flagged";
+          console.log('AI flagged for manager review');
+        }
+
+      }
+
+
+/*
+=====================
+SAVE TO DATABASE
+=====================
+*/
+
+      await pool.query(
+        `INSERT INTO expenses
+        (amount,category,description,user_id,receipt,status,receipt_amount,verification_status)
+        VALUES (?,?,?,?,?,?,?,?)`,
+        [
+          submittedAmount,
+          category,
+          description,
+          req.user.id,
+          receiptFile,
+          status,
+          receiptAmount,
+          verification_status
+        ]
+      );
+
+
+/*
+=====================
+RESPONSE TO FRONTEND
+=====================
+*/
+
+      res.json({
+        message: "Expense submitted successfully",
+        status,
+        verification_status,
+        receiptAmount
+      });
+
+    } catch (err) {
+
+      console.log(err);
+
+      res.status(500).json({
+        message: "Submission failed"
+      });
+
+    }
+
   }
+);
+
+
+/*
+=====================
+EMPLOYEE VIEW EXPENSES
+=====================
+*/
+
+app.get(
+  "/employee/expenses",
+  verifyToken,
+  async (req, res) => {
+
+    try {
+
+      const [rows] = await pool.query(
+        "SELECT * FROM expenses WHERE user_id=?",
+        [req.user.id]
+      );
+
+      res.json(rows);
+
+    } catch (err) {
+
+      console.log(err);
+
+      res.status(500).json({
+        message: "Fetch failed"
+      });
+
+    }
+
+  }
+);
+
+
+/*
+=====================
+MANAGER VIEW PENDING
+=====================
+*/
+
+app.get("/expenses/pending", async (req, res) => {
+
+  const [rows] = await pool.query(
+    "SELECT * FROM expenses WHERE status='pending'"
+  );
+
+  res.json(rows);
+
 });
 
 
-// ================= MANAGER: VIEW PENDING =================
-app.get('/expenses/pending', auth, role('manager'), async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      "SELECT * FROM expenses WHERE status = 'pending'"
-    );
+/*
+=====================
+MANAGER APPROVE
+=====================
+*/
 
-    res.json(rows);
-  } catch (err) {
-    console.error(err);
-    res.send("Error fetching pending expenses");
-  }
+app.post("/expenses/:id/approve", async (req, res) => {
+
+  await pool.query(
+    "UPDATE expenses SET status='approved' WHERE id=?",
+    [req.params.id]
+  );
+
+  res.json({ message: "Expense approved" });
+
 });
 
 
-// ================= MANAGER: APPROVE =================
-app.put('/expenses/:id/approve', auth, role('manager'), async (req, res) => {
-  try {
-    const expenseId = req.params.id;
+/*
+=====================
+MANAGER REJECT
+=====================
+*/
 
-    await pool.query(
-      "UPDATE expenses SET status = 'manager_approved', approved_by = ?, approved_at = NOW() WHERE id = ?",
-      [req.user.id, expenseId]
-    );
+app.post("/expenses/:id/reject", async (req, res) => {
 
-    res.send("Approved");
-  } catch (err) {
-    console.error(err);
-    res.send("Error approving");
-  }
+  await pool.query(
+    "UPDATE expenses SET status='rejected' WHERE id=?",
+    [req.params.id]
+  );
+
+  res.json({ message: "Expense rejected" });
+
 });
 
 
-// ================= MANAGER: REJECT =================
-app.put('/expenses/:id/reject', auth, role('manager'), async (req, res) => {
-  try {
-    const expenseId = req.params.id;
+/*
+=====================
+SERVER START
+=====================
+*/
 
-    await pool.query(
-      "UPDATE expenses SET status = 'rejected' WHERE id = ?",
-      [expenseId]
-    );
-
-    res.send("Rejected");
-  } catch (err) {
-    console.error(err);
-    res.send("Error rejecting");
-  }
-});
-
-
-// ================= ADMIN RULES =================
-app.put('/admin/update-rules', auth, role('admin'), async (req, res) => {
-  try {
-    const { auto_approve_limit, escalation_days } = req.body;
-
-    await pool.query(
-      "UPDATE rules SET auto_approve_limit = ?, escalation_days = ? WHERE id = 1",
-      [auto_approve_limit, escalation_days]
-    );
-
-    res.send("Rules updated");
-  } catch (err) {
-    console.error(err);
-    res.send("Rule update failed");
-  }
-});
-
-
-// ================= START SERVER =================
 app.listen(4000, () => {
-  console.log("🚀 Running on port 4000");
+  console.log("Server running on port 4000");
 });
