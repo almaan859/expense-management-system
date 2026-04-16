@@ -180,6 +180,7 @@ export default function EmployeeDashboard() {
               <th style={{ padding: '20px 16px', textAlign: 'left', color: '#ffffff' }}>Amount</th>
               <th style={{ padding: '20px 16px', textAlign: 'left', color: '#ffffff' }}>Status</th>
               <th style={{ padding: '20px 16px', textAlign: 'left', color: '#ffffff' }}>AI OCR</th>
+              <th style={{ padding: '20px 16px', textAlign: 'left', color: '#ffffff' }}>Summary</th>
               <th style={{ padding: '20px 16px', textAlign: 'left', color: '#ffffff' }}>Receipt</th>
             </tr>
           </thead>
@@ -201,6 +202,9 @@ export default function EmployeeDashboard() {
                 </td>
                 <td style={{ padding: '20px 16px', color: '#a0a0a0' }}>
                   {exp.receipt_amount ? `₹${exp.receipt_amount}` : 'No OCR'}
+                </td>
+                <td style={{ padding: '20px 16px', color: '#9ca3af', fontSize: '13px' }}>
+                  {exp.summary || 'Awaiting AI review'}
                 </td>
                 <td style={{ padding: '20px 16px' }}>
                   {exp.receipt ? (

@@ -4,29 +4,81 @@ import axios from "axios";
 export default function AdminDashboard() {
   const [rules, setRules] = useState({ autoApproveLimit: 1000, escalationDays: 2 });
   const [loading, setLoading] = useState(false);
+  const [newUser, setNewUser] = useState({ name: "", email: "", password: "", role: "employee", department: "" });
+  const [creating, setCreating] = useState(false);
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(true);
 
   useEffect(() => {
     fetchRules();
+    fetchUsers();
   }, []);
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem("token");
+    return { headers: { Authorization: `Bearer ${token}` } };
+  };
 
   const fetchRules = async () => {
     try {
-      // Mock for now - implement /rules GET endpoint later
-      setRules({ autoApproveLimit: 1000, escalationDays: 2 });
+      const res = await axios.get("http://localhost:4000/rules", getAuthHeaders());
+      setRules({
+        autoApproveLimit: Number(res.data.auto_approve_limit) || 1000,
+        escalationDays: Number(res.data.escalation_days) || 2
+      });
     } catch (err) {
       console.log(err);
+      setRules({ autoApproveLimit: 1000, escalationDays: 2 });
+    }
+  };
+
+  const fetchUsers = async () => {
+    setUsersLoading(true);
+    try {
+      const res = await axios.get("http://localhost:4000/users", getAuthHeaders());
+      setUsers(res.data);
+    } catch (err) {
+      console.log(err);
+    } finally {
+      setUsersLoading(false);
     }
   };
 
   const updateRules = async () => {
     setLoading(true);
     try {
-      await axios.post("http://localhost:4000/rules", rules);
-      alert("Rules updated! Restart server if needed.");
+      const res = await axios.post("http://localhost:4000/rules", rules, getAuthHeaders());
+      if (res.data?.rules) {
+        setRules({
+          autoApproveLimit: Number(res.data.rules.auto_approve_limit) || rules.autoApproveLimit,
+          escalationDays: Number(res.data.rules.escalation_days) || rules.escalationDays
+        });
+      }
+      alert("Rules updated!");
+      fetchRules();
     } catch (err) {
-      alert("Update failed");
+      alert(err.response?.data?.message || "Update failed");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const createUser = async () => {
+    if (!newUser.name || !newUser.email || !newUser.password) {
+      alert("Please fill in name, email, and password.");
+      return;
+    }
+
+    setCreating(true);
+    try {
+      await axios.post("http://localhost:4000/users", newUser, getAuthHeaders());
+      alert(`Created ${newUser.role} successfully`);
+      setNewUser({ name: "", email: "", password: "", role: "employee", department: "" });
+      fetchUsers();
+    } catch (err) {
+      alert(err.response?.data?.message || "User creation failed");
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -106,6 +158,113 @@ export default function AdminDashboard() {
             Receipts under Rs{rules.autoApproveLimit} auto-approved by AI OCR. Pending over {rules.escalationDays} days auto-escalate
           </div>
         </div>
+      </div>
+
+      <div className="glass-card" style={{ marginBottom: '40px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
+          <div className="holo-title" style={{ fontSize: '2rem' }}>👤 Create New Team Member</div>
+        </div>
+
+        <div className="form-grid">
+          <div>
+            <label style={{ display: 'block', marginBottom: '8px', color: '#a0a0a0', fontSize: '14px' }}>Name</label>
+            <div className="input-glow">
+              <input
+                type="text"
+                value={newUser.name}
+                onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+                style={{ background: 'transparent', border: 'none', color: 'inherit', width: '100%' }}
+              />
+            </div>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '8px', color: '#a0a0a0', fontSize: '14px' }}>Email</label>
+            <div className="input-glow">
+              <input
+                type="email"
+                value={newUser.email}
+                onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                style={{ background: 'transparent', border: 'none', color: 'inherit', width: '100%' }}
+              />
+            </div>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '8px', color: '#a0a0a0', fontSize: '14px' }}>Password</label>
+            <div className="input-glow">
+              <input
+                type="password"
+                value={newUser.password}
+                onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                style={{ background: 'transparent', border: 'none', color: 'inherit', width: '100%' }}
+              />
+            </div>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '8px', color: '#a0a0a0', fontSize: '14px' }}>Role</label>
+            <div className="input-glow">
+              <select
+                value={newUser.role}
+                onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+                style={{ background: 'transparent', border: 'none', color: 'inherit', width: '100%' }}
+              >
+                <option value="employee">Employee</option>
+                <option value="manager">Manager</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '8px', color: '#a0a0a0', fontSize: '14px' }}>Department</label>
+            <div className="input-glow">
+              <input
+                type="text"
+                value={newUser.department}
+                onChange={(e) => setNewUser({ ...newUser, department: e.target.value })}
+                style={{ background: 'transparent', border: 'none', color: 'inherit', width: '100%' }}
+              />
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={createUser}
+          disabled={creating}
+          className="btn-neon"
+          style={{ width: '100%', padding: '20px', fontSize: '20px', fontWeight: '700', marginTop: '20px' }}
+        >
+          {creating ? 'Creating user...' : 'Create User'}
+        </button>
+      </div>
+
+      <div className="glass-card" style={{ marginBottom: '40px' }}>
+        <div className="holo-title" style={{ fontSize: '2rem', marginBottom: '24px' }}>👥 Team Members</div>
+        {usersLoading ? (
+          <div style={{ padding: '40px', color: '#a0a0a0' }}>Loading users...</div>
+        ) : (
+          <div className="table-modern" style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ padding: '16px', textAlign: 'left', color: '#ffffff' }}>Name</th>
+                  <th style={{ padding: '16px', textAlign: 'left', color: '#ffffff' }}>Email</th>
+                  <th style={{ padding: '16px', textAlign: 'left', color: '#ffffff' }}>Role</th>
+                  <th style={{ padding: '16px', textAlign: 'left', color: '#ffffff' }}>Department</th>
+                  <th style={{ padding: '16px', textAlign: 'left', color: '#ffffff' }}>Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((user) => (
+                  <tr key={user.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                    <td style={{ padding: '16px', color: '#ffffff' }}>{user.name}</td>
+                    <td style={{ padding: '16px', color: '#a0a0a0' }}>{user.email}</td>
+                    <td style={{ padding: '16px', color: '#ffffff' }}>{user.role}</td>
+                    <td style={{ padding: '16px', color: '#a0a0a0' }}>{user.department || '—'}</td>
+                    <td style={{ padding: '16px', color: '#a0a0a0' }}>{new Date(user.created_at).toLocaleDateString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="glass-card">
